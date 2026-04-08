@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Raw recordings are too large for git — only the sample pair is committed
+data/*/1_kamera/
+data/*/2_kamera/
+!data/sample_videos/1_kamera/
+!data/sample_videos/2_kamera/
+*.tmp.mp4
+
+# Output of running the tracker on the sample videos
+data/sample_videos/tracking_cache.json
+results/sample_videos/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
