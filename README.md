@@ -200,6 +200,9 @@ Ondřej Novotný.
 
 Thanks to Marek Fürst (MFF UK), the consultant for this problem, for his introductory lecture on it.
 
+See also my solution to TMF problem 3, [Ring fountain](https://github.com/ondrej-cloud/ring-fountain):
+how high a falling washer can make water jump, with measurements and a momentum-transfer model.
+
 ## References
 
 - A. Andersen, U. Pesavento, Z. J. Wang, *Analysis of transitions between fluttering, tumbling and steady descent of
