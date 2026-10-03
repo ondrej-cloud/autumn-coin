@@ -46,20 +46,18 @@ is close to chaotic, so a single trajectory says little and the analysis works o
 ```mermaid
 flowchart LR
     A[Raw videos<br/>2 cameras × N drops] --> B[trim_videos.py<br/>cut to release moment]
-    B --> C[calibrate.py<br/>pixels → metres]
-    C --> D[track_coin.py<br/>auto-track]
+    B --> D[track_coin.py<br/>auto-track]
     D --> E{review}
     E -- OK --> F[(tracking_cache.json)]
     E -- fix points --> G[manual editor] --> F
-    F --> H[3D reconstruction<br/>+ statistics]
+    F --> C[self-calibration<br/>from the fall height]
+    C --> H[3D reconstruction<br/>+ statistics]
     H --> I[plots + CSV]
 ```
 
 1. **Trimming** (`tracking/trim_videos.py`): step through each recording frame by frame and cut it at the release.
    Uses `ffmpeg` for a lossless cut and falls back to OpenCV if `ffmpeg` is missing.
-2. **Calibration** (`tracking/calibrate.py`): click the inner top and bottom edge of the tank in both cameras.
-   The script reads phone rotation metadata (`ffprobe`), so portrait videos are handled correctly.
-3. **Tracking** (`tracking/track_coin.py`):
+2. **Tracking** (`tracking/track_coin.py`):
    - *Lock-on*: wait for motion in a narrow band just below the surface, under the electromagnet. Waves at the
      surface never trigger the lock this way.
    - *Follow*: frame differencing inside a local search window that moves with the coin. A max-jump limit and
@@ -67,6 +65,10 @@ flowchart LR
    - *Review*: replay the detected path over the video, then accept it, fix individual points in the editor or
      re-click the whole drop by hand.
    - Every accepted track is cached, so the analysis can be re-run without touching the videos.
+3. **Self-calibration**: every coin falls through the same 38 cm of water, so the vertical distance it covers in
+   pixels gives the scale of that camera for that drop. Phones were moved between recording days, and this handles
+   it without any calibration target. It also partly accounts for perspective: a coin that lands closer to the
+   camera covers more pixels. Drops whose track was lost before the bottom use the median scale of their set.
 4. **3D reconstruction and statistics**: the two views are time-synchronised by detecting the onset of the steady
    fall in each camera and interpolated onto a common time axis. Velocities come from a Savitzky–Golay filter.
    The script then averages all drops of one object into a mean trajectory with ±1σ bands, plots the landing
@@ -91,6 +93,29 @@ flowchart LR
 
 Each object has a full set of plots and a CSV with the mean trajectory and individual landing points in
 [`results/`](results/).
+
+| Object | Drops | σ landing X [cm] | σ landing Z [cm] | Median landing distance [cm] |
+| --- | ---: | ---: | ---: | ---: |
+| 1 CZK | 15 | 12.9 | 9.3 | 15.9 |
+| 2 CZK | 19 | 12.7 | 8.3 | 16.4 |
+| 5 CZK | 18 | 12.5 | 8.7 | 16.1 |
+| 10 CZK | 18 | 11.3 | 8.4 | 15.1 |
+| 20 CZK | 17 | 11.9 | 5.1 | 12.0 |
+| 50 CZK | 16 | 10.7 | 9.8 | 14.3 |
+| Washer, small hole | 20 | 11.3 | 8.5 | 13.0 |
+| Washer, large hole | 20 | 3.9 | 4.0 | 6.4 |
+
+Landing distance is measured horizontally from the release point. The tank is only ±19 cm (X) by ±16 cm (Z) around
+the release point, so many coins glide all the way to a wall. The spread of the coins is therefore partly limited
+by the tank itself. The washer with the large hole is clearly the most stable.
+
+### Accuracy
+
+The tracker checks its own calibration: no coin can land outside the tank. Most drops land inside, but a few
+come out 1–3 cm beyond a side wall. That points to a residual systematic error of about 10 % at the edges of the
+tank. It comes from perspective and refraction (the coin is first seen a few cm below the surface, and the tank
+bottom is viewed at an angle), which the single-scale calibration cannot fully remove. A full camera model, using
+the depth measured by the other camera, would fix it.
 
 ### Coins vs. washers
 
@@ -118,7 +143,7 @@ fluttering, tumbling and a periodic mixture of the two.
 ```
 tracking/
   track_coin.py         main tracker: auto-tracking, review/editor, 3D reconstruction, plots
-  calibrate.py          pixel → metre calibration from the tank height
+  calibrate.py          manual pixel → metre calibration from the tank height (for measure_velocity.py)
   trim_videos.py        cut recordings to the moment of release
   measure_velocity.py   click two frames, get the terminal velocity
 simulation/
@@ -163,7 +188,9 @@ Recordings of washers with medium-sized holes were also made but not tracked.
 
 The slides presented at the tournament are in [`docs/autumn_coin_presentation.pdf`](docs/autumn_coin_presentation.pdf).
 The 20 CZK slides (26–28) were updated after the tournament. An extra processing step had stretched the
-side-camera data for that coin, so the plots now show the unmodified measurement.
+side-camera data for that coin, so the plots now show the unmodified measurement. Since the tournament, the
+calibration has also been reworked (see [Accuracy](#accuracy)), so the plots in [`results/`](results/) are more
+accurate than the ones in the slides.
 
 ## Team
 

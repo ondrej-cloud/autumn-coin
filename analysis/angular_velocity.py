@@ -117,30 +117,23 @@ Ax, Ay = np.array(Ax), np.array(Ay)
 Bx, By = np.array(Bx), np.array(By)
 
 # ==========================================
-# 2. NASTAVENÍ KONSTANTNÍHO POLOMĚRU
+# 2. VÝPOČET ÚHLOVÉ RYCHLOSTI
 # ==========================================
-r_const = 17.8 / 2.0  # = 8.9 mm
-
-print(f"Použitý poloměr: {r_const} mm")
-
-# ==========================================
-# 3. VÝPOČET ÚHLOVÉ RYCHLOSTI
-# ==========================================
+# Úhel natočení úsečky AB v rovině kamery se mění rychlostí
+#   ω = (AB × (v_B − v_A)) / |AB|²
+# Nezávisí na jednotkách souřadnic ani na skutečném poloměru mince.
 dt = np.diff(t)
 
-# Rychlost bodu B
-vBx = np.diff(Bx) / dt
-vBy = np.diff(By) / dt
+# Relativní rychlost bodu B vůči A
+vRx = (np.diff(Bx) - np.diff(Ax)) / dt
+vRy = (np.diff(By) - np.diff(Ay)) / dt
 
-# Vektor AB
-ABx = Bx[1:] - Ax[1:]
-ABy = By[1:] - Ay[1:]
+# Vektor AB uprostřed mezi snímky
+ABx = (Bx[1:] + Bx[:-1]) / 2 - (Ax[1:] + Ax[:-1]) / 2
+ABy = (By[1:] + By[:-1]) / 2 - (Ay[1:] + Ay[:-1]) / 2
 
-# Tangenciální rychlost (kolmá složka)
-v_tang = (vBx * ABy - vBy * ABx) / r_const
-
-# Úhlová rychlost
-omega = v_tang / r_const  # rad/s
+# Úhlová rychlost (kladná = proti směru hodinových ručiček)
+omega = (ABx * vRy - ABy * vRx) / (ABx**2 + ABy**2)  # rad/s
 
 # Vyhlazení
 window = 5
@@ -151,13 +144,13 @@ omega_smooth = uniform_filter1d(omega, size=window, mode='nearest')
 # ==========================================
 fig, ax = plt.subplots(figsize=(12, 6))
 
-t_omega = t[1:]
+t_omega = (t[1:] + t[:-1]) / 2
 ax.plot(t_omega, omega, 'b-', alpha=0.3, lw=1, label='ω (raw)')
 ax.plot(t_omega, omega_smooth, 'r-', lw=2.5, label='ω (vyhlazená)')
 ax.axhline(0, color='k', ls='--', alpha=0.3)
 ax.set_xlabel('Čas [s]', fontsize=12)
 ax.set_ylabel('Úhlová rychlost ω [rad/s]', fontsize=12)
-ax.set_title(f'Úhlová rychlost (r = {r_const} mm = konstanta)', fontsize=14)
+ax.set_title('Úhlová rychlost úsečky AB', fontsize=14)
 ax.legend(fontsize=11)
 ax.grid(True, alpha=0.3)
 
@@ -186,11 +179,9 @@ np.savetxt('angular_velocity.csv', output_data,
 print("\n✓ Data uložena do 'angular_velocity.csv'")
 print("✓ Graf uložen do 'angular_velocity.png'")
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-# ... (tvoje načtení dat) ...
-
+# ==========================================
+# 6. KONTROLA DAT
+# ==========================================
 # Podívejme se na pozice bodu B v čase
 fig, axes = plt.subplots(3, 1, figsize=(12, 10))
 
@@ -209,15 +200,16 @@ axes[1].set_ylabel('vBx [jednotky/s]')
 axes[1].set_title('Rychlost bodu B v ose X (měla by být záporná)')
 axes[1].grid(True, alpha=0.3)
 
-# Graf 3: Vzdálenost |AB| v čase (měla by být KONSTANTNÍ ≈ 8.9)
+# Graf 3: Vzdálenost |AB| v čase (u mince v rovině kamery by byla konstantní,
+# při naklopení mince se průmět zkracuje)
 ABx = Bx - Ax
 ABy = By - Ay
 r = np.sqrt(ABx**2 + ABy**2)
 axes[2].plot(t, r, 'g.-', lw=2)
-axes[2].axhline(8.9, color='k', ls='--', alpha=0.5, label='r = 8.9 mm')
-axes[2].set_ylabel('|AB| [mm]')
+axes[2].axhline(np.nanmean(r), color='k', ls='--', alpha=0.5, label='průměr |AB|')
+axes[2].set_ylabel('|AB| [jednotky Trackeru]')
 axes[2].set_xlabel('Čas [s]')
-axes[2].set_title('Vzdálenost A-B (měla by být konstantní)')
+axes[2].set_title('Vzdálenost A-B (průmět do roviny kamery)')
 axes[2].legend()
 axes[2].grid(True, alpha=0.3)
 
@@ -225,6 +217,6 @@ plt.tight_layout()
 plt.savefig('data_check.png', dpi=150)
 plt.show()
 
-print(f"Průměrná vzdálenost |AB|: {np.nanmean(r):.3f} mm")
-print(f"Std |AB|: {np.nanstd(r):.3f} mm")
+print(f"Průměrná vzdálenost |AB|: {np.nanmean(r):.3f}")
+print(f"Std |AB|: {np.nanstd(r):.3f}")
 print(f"\nPočet bodů kde vBx > 0 (couvání): {np.sum(vBx > 0)} z {len(vBx)}")

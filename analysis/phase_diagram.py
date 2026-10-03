@@ -28,7 +28,8 @@ tvary = ['o']*6 + ['*', 's', 's', 's', 's', '*']
 velikosti = [150]*6 + [450, 150, 150, 150, 150, 450] 
 
 # ==========================================
-# 2. NASTAVENÍ GRAFU A ZAKŘIVENÝCH ZÓN (TEORIE)
+# 2. NASTAVENÍ GRAFU A ZÓN REŽIMŮ
+# Hranice zón jsou schematické (ručně zvolené křivky), ne výsledek výpočtu.
 # ==========================================
 plt.figure(figsize=(14, 8.5))
 
@@ -39,9 +40,9 @@ y_flutter_chaos = 0.012 + 0.15 * np.exp(-x_zone / 2000)
 y_chaos_tumble = 0.025 + 0.20 * np.exp(-x_zone / 2000)
 
 # Zóny
-plt.fill_between(x_zone, 0.001, y_flutter_chaos, color='#4dabf7', alpha=0.15, label='Theory: Fluttering (Stable)')
-plt.fill_between(x_zone, y_flutter_chaos, y_chaos_tumble, color='#ffd43b', alpha=0.25, label='Theory: Chaotic Transition')
-plt.fill_between(x_zone, y_chaos_tumble, 0.1, color='#fa5252', alpha=0.15, label='Theory: Tumbling (Chaotic)')
+plt.fill_between(x_zone, 0.001, y_flutter_chaos, color='#4dabf7', alpha=0.15, label='Fluttering (stable)')
+plt.fill_between(x_zone, y_flutter_chaos, y_chaos_tumble, color='#ffd43b', alpha=0.25, label='Chaotic transition')
+plt.fill_between(x_zone, y_chaos_tumble, 0.1, color='#fa5252', alpha=0.15, label='Tumbling')
 
 # ==========================================
 # 3. VYKRESLENÍ BODŮ
@@ -67,7 +68,7 @@ plt.ylim(0.005, 0.05)
 
 plt.xlabel('Reynolds Number (Re) →', fontsize=13, fontweight='bold')
 plt.ylabel('Dimensionless Moment of Inertia (I*) →', fontsize=13, fontweight='bold')
-plt.title('Phase Diagram: Breaking the Theory with a Central Hole', fontsize=16, fontweight='bold')
+plt.title('Phase Diagram: Coins vs. Washers (schematic regime boundaries)', fontsize=16, fontweight='bold')
 
 plt.grid(True, which="both", linestyle="--", alpha=0.4)
 plt.legend(fontsize=11, loc='upper right', framealpha=0.9)

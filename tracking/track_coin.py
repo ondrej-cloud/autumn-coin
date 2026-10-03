@@ -16,22 +16,26 @@ import math
 import argparse
 
 # =========================================================
-# KONFIGURACE (Zde vložte výsledky z kalibračního skriptu)
+# KONFIGURACE
 # =========================================================
 
 # Cesty se přepíšou podle argumentu z příkazové řádky (viz __main__)
 CAM1_SLOZKA  = "1_kamera"
-CAM1_MPX_X = 0.00068223
-CAM1_MPX_Y = 0.00068223
-
 CAM2_SLOZKA  = "2_kamera"
-CAM2_MPX_X = 0.00071295
-CAM2_MPX_Y = 0.00071295
 
 FPS_VIDEA           = 60.0
-CHYBA_M             = 0.006
-CHYBA_CM            = CHYBA_M * 100
-HLOUBKA_AKVARIA_CM  = 38.0
+HLOUBKA_AKVARIA_CM  = 38.0   # hloubka vody = dráha mince od hladiny ke dnu
+
+# Kalibrace (cm/px) se nepočítá z pevné konstanty, ale z každého pádu zvlášť:
+# mince vždy urazí HLOUBKA_AKVARIA_CM, takže svislá dráha v pixelech dává
+# měřítko dané kamery v daném dni — a protože mince dopadá různě daleko od
+# kamery, zahrne to i perspektivu. Pády, kde se tracking ztratil dřív než
+# u dna (dráha < MIN_PODIL_PADU × medián), dostanou medián měřítka celé sady.
+MIN_PODIL_PADU      = 0.8
+
+# Vnitřní rozměry nádrže v pohledu kamer — slouží jen ke kontrole dopadů
+SIRKA_X_CM = 38.0   # kamera 1 (předni) kouká na delší stranu
+SIRKA_Z_CM = 32.0   # kamera 2 (boční) kouká na kratší stranu
 
 # Velikost okna — detekuje rozlišení obrazovky automaticky
 try:
@@ -44,8 +48,16 @@ except Exception:
     SIRKA_OKNA = 1920
     VYSKA_OKNA = 1080
 
+# Hmotnosti podle prefixu názvu videa (např. "10kc13" -> 10 Kč)
 HMOTNOST_KG = {
-    "default": 0.00843,
+    "1kc":          0.00360,
+    "2kc":          0.00370,
+    "5kc":          0.00480,
+    "10kc":         0.00762,
+    "20kc":         0.00842,
+    "50kc":         0.00970,
+    "nejmensidira": 0.00470,   # lehká podložka s malou dírou
+    "velkadira":    0.01190,   # těžká podložka s velkou dírou
 }
 G = 9.81
 
@@ -56,10 +68,11 @@ CACHE_SOUBOR = "tracking_cache.json"
 # =========================================================
 
 def ziskej_hmotnost(nazev):
-    for k, v in HMOTNOST_KG.items():
-        if k.lower() in nazev.lower():
-            return v
-    return HMOTNOST_KG["default"]
+    # Nejdelší prefix první, aby "10kc13" nespadlo pod "1kc"
+    for k in sorted(HMOTNOST_KG, key=len, reverse=True):
+        if nazev.lower().startswith(k):
+            return HMOTNOST_KG[k]
+    sys.exit(f"CHYBA: Neznámá hmotnost pro '{nazev}' — doplň ji do HMOTNOST_KG.")
 
 def vyhladj(arr):
     n = len(arr)
@@ -561,16 +574,16 @@ def vyres_tracking(video_path, nazev_kamery, cache_key):
 # ZPRACOVÁNÍ DAT (Kalibrace, Čištění, Grafy)
 # =========================================================
 
-# Nahraď funkci cistuj_a_kalibruj tímto:
-
-def cistuj_a_kalibruj(raw_x, raw_y, mpx_x, mpx_y):
+def cistuj(raw_x, raw_y):
+    """Ořízne track na úsek stabilního pádu a doplní mezery interpolací.
+    Vrací (tx, ty) v pixelech a absolutní číslo startovního snímku ve videu."""
     valid = np.where(~np.isnan(raw_x))[0]
     if len(valid) < 5: return None, None, None
     si = valid[0]; ei = valid[-1]
-    
+
     tx = raw_x[si:ei+1].copy()
     ty = raw_y[si:ei+1].copy()
-    
+
     mask = np.isnan(tx)
     idx  = np.arange(len(tx))
     if mask.any() and (~mask).sum() >= 2:
@@ -584,90 +597,69 @@ def cistuj_a_kalibruj(raw_x, raw_y, mpx_x, mpx_y):
             start = i
             break
 
-    # Zásadní úprava: Zapamatujeme si ABSOLUTNÍ číslo snímku z původního videa
+    # Absolutní číslo snímku — podle něj se synchronizují obě kamery
     abs_start_frame = si + start
+    return tx[start:], ty[start:], abs_start_frame
 
-    tx = tx[start:]
-    ty = ty[start:]
+def draha_padu_px(raw_x, raw_y):
+    """Svislá dráha mince v pixelech od začátku pádu po poslední bod."""
+    tx, ty, _ = cistuj(raw_x, raw_y)
+    return np.nan if tx is None else ty[-1] - ty[0]
 
-    x_cm = (tx - tx[0]) * mpx_x * 100
-    y_cm = (ty - ty[0]) * mpx_y * 100
-    y_cm = np.clip(y_cm, 0, None)
-    
-    # Vracíme 3 hodnoty! Přidán startovní snímek.
-    return x_cm, y_cm, abs_start_frame
+def kalibruj(tx, ty, median_px, popis):
+    """Převede pixely na cm. Mince urazí celou hloubku vody, takže
+    HLOUBKA_AKVARIA_CM / (dráha v px) je měřítko pro tento pád a tuto kameru."""
+    draha = ty[-1] - ty[0]
+    if draha < MIN_PODIL_PADU * median_px:
+        print(f"    [{popis}] Track končí {draha:.0f} px před dnem "
+              f"(medián {median_px:.0f} px) -> použito měřítko podle mediánu")
+        draha = median_px
+    cm_na_px = HLOUBKA_AKVARIA_CM / draha
+    x_cm = (tx - tx[0]) * cm_na_px
+    y_cm = np.clip((ty - ty[0]) * cm_na_px, 0, None)
+    return x_cm, y_cm
 
-def pridej_zacatek(x_cm, y_cm, z_cm, time_s):
-    # Škálování podle hloubky akvária zůstává
-    if y_cm[-1] > 1.0:
-        scale = HLOUBKA_AKVARIA_CM / y_cm[-1]
-        y_cm  = y_cm * scale
-        
-    # OPRAVA: Odstraněn pokus o vkládání bodů [0.0, 1.0] atd.
-    # Data prostě pošleme dál tak, jak jsou, protože už bezpečně 
-    # začínají na (0,0,0) díky předchozí funkci.
-    
-    # Jen srovnáme čas, aby začínal přesně na nule
-    t_out = time_s - time_s[0]
-    
-    return x_cm, y_cm, z_cm, t_out
+def zpracuj_par(nazev, raw1, raw2, hmotnost_kg, median_px):
+    raw1x, raw1y = raw1
+    tx1, ty1, start1 = cistuj(raw1x, raw1y)
+    if tx1 is None: return None
+    x_cm, y1_cm = kalibruj(tx1, ty1, median_px[1], f"{nazev} kamera 1")
 
-def zpracuj_par(video1_path, video2_path, hmotnost_kg):
-    nazev = os.path.splitext(os.path.basename(video1_path))[0]
-    print(f"\n==============================================")
-    print(f" ZPRACOVAVAM PAR: {nazev}")
-    print(f"==============================================")
+    raw2x, raw2y = raw2
+    tx2 = None
+    if raw2x is not None:
+        tx2, ty2, start2 = cistuj(raw2x, raw2y)
 
-    key1 = f"{nazev}_cam1"
-    raw1x, raw1y = vyres_tracking(video1_path, "Kamera 1 (predni)", key1)
-    if raw1x is None: return None
-    
-    # Rozbalujeme 3 hodnoty
-    x_cm, y1_cm, start1 = cistuj_a_kalibruj(raw1x, raw1y, CAM1_MPX_X, CAM1_MPX_Y)
-    if x_cm is None: return None
-    
-    key2 = f"{nazev}_cam2"
-    raw2x, raw2y = vyres_tracking(video2_path, "Kamera 2 (bocni)", key2)
-    
-    if raw2x is None:
+    if tx2 is None:
         z_cm = np.zeros_like(x_cm)
         y_cm = y1_cm
         time_s = np.arange(len(x_cm)) / FPS_VIDEA
     else:
-        # Rozbalujeme 3 hodnoty
-        z_raw, y2_cm, start2 = cistuj_a_kalibruj(raw2x, raw2y, CAM2_MPX_X, CAM2_MPX_Y)
-        if z_raw is None:
-            z_cm = np.zeros_like(x_cm)
-            y_cm = y1_cm
-            time_s = np.arange(len(x_cm)) / FPS_VIDEA
-        else:
-            # TADY JE TA MAGIE: Synchronizace podle absolutního čísla snímku z videí
-            t1 = (np.arange(len(x_cm)) + start1) / FPS_VIDEA
-            t2 = (np.arange(len(z_raw)) + start2) / FPS_VIDEA
+        z_raw, _ = kalibruj(tx2, ty2, median_px[2], f"{nazev} kamera 2")
 
-            # Společný čas začíná až tam, kde OBĚ kamery už stoprocentně vidí padající minci
-            t_start = max(t1[0], t2[0])
-            t_end   = min(t1[-1], t2[-1])
-            
-            if t_end <= t_start: return None # Bezpečnostní pojistka
+        # Synchronizace podle absolutního čísla snímku z videí
+        t1 = (np.arange(len(x_cm)) + start1) / FPS_VIDEA
+        t2 = (np.arange(len(z_raw)) + start2) / FPS_VIDEA
 
-            n = max(int((t_end - t_start) * FPS_VIDEA), 5)
-            t_sp = np.linspace(t_start, t_end, n)
+        # Společný čas začíná až tam, kde OBĚ kamery už vidí padající minci
+        t_start = max(t1[0], t2[0])
+        t_end   = min(t1[-1], t2[-1])
+        if t_end <= t_start: return None
 
-            # Sjednotíme data na společnou časovou osu
-            x_cm = interp1d(t1, x_cm, kind='linear')(t_sp)
-            y_cm = interp1d(t1, y1_cm, kind='linear')(t_sp)
-            z_cm = interp1d(t2, z_raw, kind='linear')(t_sp)
+        n = max(int((t_end - t_start) * FPS_VIDEA), 5)
+        t_sp = np.linspace(t_start, t_end, n)
 
-            # Teprve TEĎ posuneme starty os na [0, 0, 0] — nyní jsou data v čase perfektně sladěna!
-            x_cm = x_cm - x_cm[0]
-            y_cm = y_cm - y_cm[0]
-            z_cm = z_cm - z_cm[0]
-            
-            time_s = t_sp - t_sp[0]
+        x_cm = interp1d(t1, x_cm, kind='linear')(t_sp)
+        y_cm = interp1d(t1, y1_cm, kind='linear')(t_sp)
+        z_cm = interp1d(t2, z_raw, kind='linear')(t_sp)
+
+        # Starty os na [0, 0, 0] až po sladění v čase
+        x_cm = x_cm - x_cm[0]
+        y_cm = y_cm - y_cm[0]
+        z_cm = z_cm - z_cm[0]
+        time_s = t_sp - t_sp[0]
 
     y_cm = np.clip(y_cm, 0, HLOUBKA_AKVARIA_CM)
-    x_cm, y_cm, z_cm, time_s = pridej_zacatek(x_cm, y_cm, z_cm, time_s)
 
     return {
         "nazev":       nazev,
@@ -681,37 +673,18 @@ def zpracuj_par(video1_path, video2_path, hmotnost_kg):
         "kvalita":     1.0,
     }
 
-def aplikuj_skalovacie_omezeni(vsechna_data, max_x_cm=31.0, max_z_cm=37.0):
-    """
-    Škáluje všechny trajektorie stejným koeficientem tak, aby žádný dopad 
-    nepřesahoval max_x_cm (V-Z) a max_z_cm (S-J).
-    """
-    # Najdi maximální rozměry dopadů
-    final_xs = np.array([d["final_x"] for d in vsechna_data])
-    final_zs = np.array([d["final_z"] for d in vsechna_data])
-    
-    max_dopad_x = max(abs(final_xs.min()), abs(final_xs.max()))
-    max_dopad_z = max(abs(final_zs.min()), abs(final_zs.max()))
-    
-    # Vypočti škálovací koeficient (vezmi ten přísnější)
-    koef_x = max_x_cm / (2 * max_dopad_x) if max_dopad_x > 0 else 1.0
-    koef_z = max_z_cm / (2 * max_dopad_z) if max_dopad_z > 0 else 1.0
-    koef = min(koef_x, koef_z, 1.0)  # Nikdy nezvětšuj, jen zmenšuj
-    
-    if koef < 1.0:
-        print(f"\n  ŠKÁLOVÁNÍ: Dopady přesahují limit → aplikuji koeficient {koef:.3f}")
-        print(f"    Původní rozsah: X ±{max_dopad_x:.1f} cm, Z ±{max_dopad_z:.1f} cm")
-        print(f"    Nový rozsah:    X ±{max_dopad_x*koef:.1f} cm, Z ±{max_dopad_z*koef:.1f} cm")
-        
-        for d in vsechna_data:
-            d["x_cm"] = d["x_cm"] * koef
-            d["z_cm"] = d["z_cm"] * koef
-            d["final_x"] = d["final_x"] * koef
-            d["final_z"] = d["final_z"] * koef
-    else:
-        print(f"\n  ŠKÁLOVÁNÍ: Dopady v limitu, škálování není potřeba.")
-    
-    return vsechna_data
+def zkontroluj_dopady(vsechna_data):
+    """Kontrola kalibrace: dopad nemůže být dál od startu (≈ střed nádrže),
+    než je polovina nádrže. Nic neupravuje, jen upozorní."""
+    fx = np.array([d["final_x"] for d in vsechna_data])
+    fz = np.array([d["final_z"] for d in vsechna_data])
+    print(f"\n  KONTROLA DOPADŮ: X {fx.min():+.1f} až {fx.max():+.1f} cm "
+          f"(nádrž ±{SIRKA_X_CM/2:.0f}), Z {fz.min():+.1f} až {fz.max():+.1f} cm "
+          f"(nádrž ±{SIRKA_Z_CM/2:.0f})")
+    for d in vsechna_data:
+        if abs(d["final_x"]) > SIRKA_X_CM / 2 or abs(d["final_z"]) > SIRKA_Z_CM / 2:
+            print(f"    POZOR: {d['nazev']} dopadl mimo nádrž "
+                  f"(X={d['final_x']:+.1f}, Z={d['final_z']:+.1f} cm)")
 
 def sparuj_videa():
     videa1 = sorted(glob.glob(os.path.join(CAM1_SLOZKA, "*.mp4")))
@@ -1188,10 +1161,29 @@ if __name__ == "__main__":
     os.chdir(out_dir)  # grafy a CSV se ukládají do aktuální složky
     print(f"\nNalezeno {len(pary)} párů videí.\n")
 
-    vsechna_data = []
+    # 1) Tracking všech pádů (z cache, nebo interaktivně)
+    tracky = []
     for v1, v2 in pary:
-        hmotnost = ziskej_hmotnost(os.path.basename(v1))
-        vysledek = zpracuj_par(v1, v2 if v2 else v1, hmotnost)
+        nazev = os.path.splitext(os.path.basename(v1))[0]
+        print(f"\n==============================================")
+        print(f" PAR: {nazev}")
+        print(f"==============================================")
+        raw1 = vyres_tracking(v1, "Kamera 1 (predni)", f"{nazev}_cam1")
+        if raw1[0] is None: continue
+        raw2 = vyres_tracking(v2 if v2 else v1, "Kamera 2 (bocni)", f"{nazev}_cam2")
+        tracky.append((nazev, raw1, raw2))
+
+    # 2) Typická dráha pádu v pixelech pro každou kameru (záloha pro neúplné tracky)
+    median_px = {}
+    for cam in (1, 2):
+        drahy = [draha_padu_px(*t[cam]) for t in tracky if t[cam][0] is not None]
+        median_px[cam] = float(np.nanmedian(drahy)) if drahy else np.nan
+    print(f"\nMedián dráhy pádu: kamera 1 {median_px[1]:.0f} px, kamera 2 {median_px[2]:.0f} px")
+
+    # 3) Kalibrace, synchronizace a 3D rekonstrukce
+    vsechna_data = []
+    for nazev, raw1, raw2 in tracky:
+        vysledek = zpracuj_par(nazev, raw1, raw2, ziskej_hmotnost(nazev), median_px)
         if vysledek:
             vsechna_data.append(vysledek)
 
@@ -1199,7 +1191,7 @@ if __name__ == "__main__":
         print("Málo dat (potřeba >= 2 páry).")
         sys.exit(1)
 
-    vsechna_data = aplikuj_skalovacie_omezeni(vsechna_data, max_x_cm=31.0, max_z_cm=37.0)
+    zkontroluj_dopady(vsechna_data)
 
     label = os.path.commonprefix([d["nazev"] for d in vsechna_data]).strip("_- ")
 
