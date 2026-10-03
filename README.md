@@ -132,6 +132,7 @@ data/
 results/
   <object>/             plots + CSV for every object
 media/                  animations used in this README
+docs/                   tournament presentation (PDF)
 ```
 
 ## Running it
@@ -157,6 +158,12 @@ Results go to `results/<dataset name>/` by default. Use `-o <folder>` to change 
 video frame. `x` is measured from the centre of the frame, `y` from the top, and `null` means the coin was not
 visible in that frame. The full set of raw recordings (409 videos, ~1.5 GB) is not part of the repository.
 Recordings of washers with medium-sized holes were also made but not tracked.
+
+## Presentation
+
+The slides presented at the tournament are in [`docs/autumn_coin_presentation.pdf`](docs/autumn_coin_presentation.pdf).
+The 20 CZK slides (26–28) were updated after the tournament. An extra processing step had stretched the
+side-camera data for that coin, so the plots now show the unmodified measurement.
 
 ## Team
 
