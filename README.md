@@ -168,7 +168,8 @@ side-camera data for that coin, so the plots now show the unmodified measurement
 ## Team
 
 Team **Olomoucké srnky**, Gymnázium Olomouc-Hejčín: Vojtěch Přibyl, Michael Ambros and Ondřej Novotný.
-The tracking and analysis code in this repository was written by Ondřej Novotný.
+The experiment, the measurements and all the tracking and analysis code in this repository are the work of
+Ondřej Novotný.
 
 Thanks to Marek Fürst (MFF UK), the consultant for this problem, for his introductory lecture on it.
 
